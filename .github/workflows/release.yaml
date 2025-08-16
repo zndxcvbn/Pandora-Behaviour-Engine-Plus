@@ -99,6 +99,8 @@ jobs:
             -r ${{ matrix.rid }} `
             -o "${{ github.workspace }}/${{ matrix.output-dir }}" `
             --self-contained true `
+            -p:Version=${{ github.ref_name }} `
+            -p:AssemblyVersion=${{ github.ref_name }} `
             /p:PublishSingleFile=true `
             /p:IncludeAllContentForSelfExtract=true
 
