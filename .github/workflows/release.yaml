@@ -8,14 +8,12 @@ on:
 env:
   DOTNET_VERSION: "9.0.x"
   PROFILE: Release # Release | Debug
-  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages # Since env cannot be specified in composite action, specify cache dir individually.
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
 jobs:
-  build:
-    permissions:
-      contents: write # Required for creating releases
+  build_and_test:
+    name: Build and Test
     runs-on: windows-latest
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,41 +25,35 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
         shell: bash
 
-      - name: Set output paths
-        id: set_paths
-        shell: pwsh
-        run: |
-          $output_dir='${{ github.workspace }}/Pandora Behaviour Engine/bin/${{ env.PROFILE }}/net9.0'
-          $zip_file_name="Pandora_Behaviour_Engine_${{ github.ref_name }}.zip"
-          $zip_dir='${{ github.workspace }}/Output'
-
-          echo "output_dir=$output_dir" >> $env:GITHUB_OUTPUT
-          $zip_path="$zip_dir/$zip_file_name"
-          echo "zip_path=$zip_path" >> $env:GITHUB_OUTPUT
-
-      - name: Build & Test -> Upload a Build Artifact
+      - name: Build & Test
         uses: ./.github/actions/build-and-test
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
           configuration: ${{ env.PROFILE }}
           solution-path: "./Pandora+.sln"
-          output-dir: ${{ steps.set_paths.outputs.output_dir }}
-          build-args: "/p:Version=${{ env.VERSION }} /p:AssemblyVersion=${{ env.VERSION }} /p:FileVersion=${{ env.VERSION }}"
 
-      - name: Zip and Release
-        uses: ./.github/actions/zip-and-release
-        with:
-          title: Pandora Behaviour Engine ${{ github.ref_name }}
-          tag: ${{ github.ref_name }}
-          output-dir: ${{ steps.set_paths.outputs.output_dir }}
-          zip-path: ${{ steps.set_paths.outputs.zip_path }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+  create_release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build_and_test
+    permissions:
+      contents: write 
+    steps:
+      - name: Create empty GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" \
+            --title "Pandora Behaviour Engine $TAG_NAME" \
+            --generate-notes
 
   publish:
+    name: Publish Cross-Platform Assets
     permissions:
-      contents: write # Required for creating releases
+      contents: write
     runs-on: ${{ matrix.runner }}
-    needs: build
+    needs: create_release
 
     strategy:
       matrix:
@@ -76,19 +68,18 @@ jobs:
           - rid: win-arm64
             runner: windows-latest
             output-dir: Output.Win-Arm64
-
           # Linux targets
           - rid: linux-x64
-            runner: windows-latest
+            runner: ubuntu-latest
             output-dir: Output.Linux-x64
           - rid: linux-arm
-            runner: windows-latest
+            runner: ubuntu-latest
             output-dir: Output.Linux-Arm
           - rid: linux-arm64
-            runner: windows-latest
+            runner: ubuntu-latest
             output-dir: Output.Linux-Arm64
           - rid: linux-musl-x64
-            runner: windows-latest
+            runner: ubuntu-latest
             output-dir: Output.Linux-Musl-x64
 
     steps:
@@ -116,10 +107,9 @@ jobs:
             /p:AssemblyVersion=${{ env.VERSION }} `
             /p:FileVersion=${{ env.VERSION }}
 
-      - name: Zip and Release
+      - name: Zip and Upload Asset
         uses: ./.github/actions/zip-and-release
         with:
-          # NOTE: The title is not provided here, so it will append to the existing release.
           tag: ${{ github.ref_name }}
           output-dir: ${{ matrix.output-dir }}
           zip-path: "${{ matrix.output-dir }}/Pandora_Behaviour_Engine_${{ github.ref_name }}_${{ matrix.rid }}_net.zip"
